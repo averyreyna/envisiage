@@ -1,12 +1,24 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { fly } from 'svelte/transition';
+  import { fade } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
   import { get } from 'svelte/store';
   import { marked } from 'marked';
   import { editorInstance, editorScrollTop } from '$lib/stores/editor';
   import { annotationsStore } from '$lib/stores/annotations';
-  import { hoveredAnnotationId, expandAndScrollToId } from '$lib/stores/ui';
+  import { hoveredAnnotationId, expandAndScrollToId, activeAnnotationId } from '$lib/stores/ui';
   import { annotationSummary } from '$lib/utils/summary';
   import type { Annotation } from '$lib/stores/annotations';
+
+  const flyParams = { x: 24, duration: 300, easing: cubicOut };
+  const wordFadeParams = { duration: 100 };
+
+  // split into words and spaces so we can animate each segment during streaming
+  function streamingSegments(text: string): string[] {
+    if (!text.trim()) return [];
+    return text.split(/(\s+)/).filter(Boolean);
+  }
 
   $: editor = $editorInstance;
   $: scrollTop = $editorScrollTop;
@@ -44,6 +56,7 @@
   $: if (expandId) {
     const id = expandId;
     expandAndScrollToId.set(null);
+    activeAnnotationId.set(id);
     annotationsStore.expand(id);
     tick().then(() => {
       document.getElementById(`annotation-card-${id}`)?.scrollIntoView({
@@ -54,16 +67,23 @@
   }
 
   function remove(id: string) {
+    if ($activeAnnotationId === id) activeAnnotationId.set(null);
     annotationsStore.remove(id);
   }
 
-  function toggleCollapsed(id: string) {
-    annotationsStore.toggleCollapsed(id);
+  function toggleCollapsed(annotation: Annotation) {
+    const expanding = annotation.status === 'collapsed';
+    annotationsStore.toggleCollapsed(annotation.id);
+    if (expanding) {
+      activeAnnotationId.set(annotation.id);
+    } else {
+      activeAnnotationId.set(null);
+    }
   }
 
   function handleCardClick(annotation: Annotation, e: MouseEvent) {
     if (annotation.status === 'collapsed') {
-      toggleCollapsed(annotation.id);
+      toggleCollapsed(annotation);
     }
     const target = e.target as HTMLElement;
     if (target.closest('.card-dismiss')) return;
@@ -92,7 +112,7 @@
       followUpSubmitting = followUpSubmitting;
       return;
     }
-    // Thread now ends with [newUserMsg, emptyAssistant]; send history only for API
+    // send only prior messages; the last two (new user msg + empty assistant) are excluded for the api
     const threadForApi = ann.thread.slice(0, -2).map((m) => ({ role: m.role, content: m.content }));
 
     try {
@@ -218,45 +238,59 @@
 <div class="overlay">
   {#each positions as { annotation, top, zIndex } (annotation.id)}
     <div
-      id="annotation-card-{annotation.id}"
-      class="card"
-      class:card-loading={annotation.status === 'loading'}
-      class:card-streaming={annotation.status === 'streaming'}
-      class:card-collapsed={annotation.status === 'collapsed'}
+      class="card-wrapper"
       style="top: {top}px; z-index: {zIndex}"
-      role="region"
-      aria-label="Annotation at line {annotation.selectionRange.startLine}"
-      tabindex={annotation.status === 'collapsed' ? 0 : undefined}
-      on:mouseenter={() => hoveredAnnotationId.set(annotation.id)}
-      on:mouseleave={() => hoveredAnnotationId.set(null)}
-      on:click={(e) => handleCardClick(annotation, e)}
-      on:keydown={(e) => {
-        if (annotation.status === 'collapsed' && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault();
-          toggleCollapsed(annotation.id);
-        }
-      }}
+      in:fly={flyParams}
+      out:fly={flyParams}
     >
-      <div class="card-accent"></div>
-      <div class="card-body">
-        {#if annotation.status === 'collapsed'}
-          <div class="card-summary-row">
-            <p class="card-summary">{annotationSummary(annotation.explanation)}</p>
-            {#if annotation.thread.length > 0}
-              <span class="card-thread-badge" aria-label="{annotation.thread.length} follow-up messages">
-                {annotation.thread.length}
-              </span>
-            {/if}
-          </div>
-        {:else}
-          <div class="card-scroll">
-            <div class="card-content">
-              {#if annotation.status === 'loading'}
-                <p class="card-loading-text">Thinking…</p>
-              {:else if annotation.explanation}
-                <div class="card-markdown">{@html renderedHtml(annotation.explanation)}</div>
+      <div
+        id="annotation-card-{annotation.id}"
+        class="card"
+        class:card-loading={annotation.status === 'loading'}
+        class:card-streaming={annotation.status === 'streaming'}
+        class:card-collapsed={annotation.status === 'collapsed'}
+        role={annotation.status === 'collapsed' ? 'button' : 'region'}
+        aria-label="Annotation at line {annotation.selectionRange.startLine}"
+        tabindex={annotation.status === 'collapsed' ? 0 : -1}
+        on:mouseenter={() => hoveredAnnotationId.set(annotation.id)}
+        on:mouseleave={() => hoveredAnnotationId.set(null)}
+        on:click={(e) => handleCardClick(annotation, e)}
+        on:keydown={(e) => {
+          if (annotation.status === 'collapsed' && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            toggleCollapsed(annotation);
+          }
+        }}
+      >
+        {#if annotation.status === 'loading' || annotation.status === 'streaming'}
+          <div class="card-energy" aria-hidden="true"></div>
+        {/if}
+        <div class="card-accent"></div>
+        <div class="card-body">
+          {#if annotation.status === 'collapsed'}
+            <div class="card-summary-row">
+              <p class="card-summary">{annotationSummary(annotation.explanation)}</p>
+              {#if annotation.thread.length > 0}
+                <span class="card-thread-badge" aria-label="{annotation.thread.length} follow-up messages">
+                  {annotation.thread.length}
+                </span>
               {/if}
             </div>
+          {:else}
+            <div class="card-scroll">
+              <div class="card-content">
+                {#if annotation.status === 'loading'}
+                  <p class="card-loading-text">Thinking…</p>
+                {:else if (annotation.status === 'streaming' && annotation.explanation)}
+                  <div class="card-markdown card-markdown-streaming">
+                    {#each streamingSegments(annotation.explanation) as segment, i (i)}
+                      <span class="streaming-word" in:fade={wordFadeParams}>{segment}</span>
+                    {/each}
+                  </div>
+                {:else if annotation.explanation}
+                  <div class="card-markdown">{@html renderedHtml(annotation.explanation)}</div>
+                {/if}
+              </div>
             {#if annotation.thread.length > 0}
               <div class="card-thread">
                 {#each annotation.thread as msg (msg.id)}
@@ -282,7 +316,7 @@
                 type="button"
                 class="card-collapse-btn"
                 aria-label="Collapse annotation"
-                on:click|stopPropagation={() => toggleCollapsed(annotation.id)}
+                on:click|stopPropagation={() => toggleCollapsed(annotation)}
               >
                 −
               </button>
@@ -331,6 +365,7 @@
         {/if}
       </div>
     </div>
+    </div>
   {/each}
 </div>
 
@@ -345,10 +380,17 @@
     flex-shrink: 0;
   }
 
-  .card {
+  .card-wrapper {
     position: absolute;
     left: var(--space-sm, 8px);
     right: var(--space-sm, 8px);
+    transition: top var(--duration-normal, 250ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+  }
+
+  .card {
+    position: relative;
+    left: 0;
+    right: 0;
     max-height: 320px;
     min-height: 48px;
     background: var(--bg-editor, #fff);
@@ -356,7 +398,6 @@
     border-radius: 6px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
     display: flex;
-    transition: top var(--duration-normal, 250ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1));
     cursor: default;
   }
 
@@ -412,6 +453,40 @@
 
   .card-streaming {
     border-color: var(--ai-teal-light, #ccfbf1);
+  }
+
+  .card-energy {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: 6px 6px 0 0;
+    background: linear-gradient(
+      90deg,
+      var(--ai-teal-light, #ccfbf1) 0%,
+      var(--ai-teal, #0d9488) 50%,
+      var(--ai-teal-light, #ccfbf1) 100%
+    );
+    background-size: 200% 100%;
+    animation: card-energy-shimmer var(--duration-slow, 400ms) ease-in-out infinite;
+  }
+
+  @keyframes card-energy-shimmer {
+    0% {
+      background-position: 100% 0;
+    }
+    100% {
+      background-position: -100% 0;
+    }
+  }
+
+  .card-markdown-streaming {
+    display: inline;
+  }
+
+  .card-markdown-streaming .streaming-word {
+    display: inline;
   }
 
   @keyframes pulse-border {

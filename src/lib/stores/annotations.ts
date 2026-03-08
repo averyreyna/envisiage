@@ -60,7 +60,6 @@ function saveToSession(list: Annotation[]) {
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(list));
   } catch {
-    // ignore
   }
 }
 
@@ -256,5 +255,4 @@ function createAnnotationsStore() {
 
 export const annotationsStore = createAnnotationsStore();
 
-/** For backward compatibility in components that still use the old name */
 export type PlaceholderAnnotation = Annotation;

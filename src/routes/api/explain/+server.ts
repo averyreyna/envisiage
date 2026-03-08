@@ -13,9 +13,13 @@ export const POST: RequestHandler = async ({ request }) => {
   let body: {
     code: string;
     selection: string;
-    fullContext: string;
+    fullContext?: string;
     language: string;
     reExplain?: 'different' | 'simpler' | 'technical';
+    granularity?: 'eli5' | 'step-through' | 'technical' | 'debug';
+    contextAbove?: string;
+    contextBelow?: string;
+    enclosingScope?: string;
   };
   try {
     body = await request.json();
@@ -23,9 +27,33 @@ export const POST: RequestHandler = async ({ request }) => {
     return json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { code, selection, fullContext, language, reExplain } = body;
+  const {
+    code,
+    selection,
+    fullContext,
+    language,
+    reExplain,
+    granularity,
+    contextAbove,
+    contextBelow,
+    enclosingScope
+  } = body;
   if (typeof selection !== 'string') {
     return json({ error: 'Missing or invalid selection' }, { status: 400 });
+  }
+
+  const contextParts: string[] = [];
+  if (enclosingScope?.trim()) {
+    contextParts.push('Enclosing scope (function/block):', '```', enclosingScope.trim(), '```', '');
+  }
+  if (contextAbove?.trim()) {
+    contextParts.push('Context above selection:', '```', contextAbove.trim(), '```', '');
+  }
+  if (contextBelow?.trim()) {
+    contextParts.push('Context below selection:', '```', contextBelow.trim(), '```', '');
+  }
+  if (contextParts.length === 0 && (fullContext || code)) {
+    contextParts.push('Surrounding context (for reference only):', '```', fullContext || code || '', '```');
   }
 
   const userContent = [
@@ -36,10 +64,7 @@ export const POST: RequestHandler = async ({ request }) => {
     selection,
     '```',
     '',
-    'Surrounding context (for reference only):',
-    '```',
-    fullContext || code || '',
-    '```'
+    ...contextParts
   ].join('\n');
 
   const client = new Anthropic({ apiKey });
@@ -47,7 +72,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const stream = client.messages.stream({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 1024,
-    system: getExplainSystemPrompt(reExplain),
+    system: getExplainSystemPrompt({ reExplain, granularity }),
     messages: [{ role: 'user', content: userContent }]
   });
 

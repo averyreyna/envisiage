@@ -1,6 +1,3 @@
-/**
- * Build system prompt for follow-up questions within an annotation.
- */
 export function buildFollowupSystemPrompt(
   selectedText: string,
   explanation: string,

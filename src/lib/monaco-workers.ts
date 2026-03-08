@@ -1,16 +1,12 @@
-/**
- * Configure Monaco editor web workers for Vite.
- * Must be called once before creating any editor instance (e.g. in CodeEditor onMount).
- */
 import type * as Monaco from 'monaco-editor';
 
-// Vite bundles these as worker constructors
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
 import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
 import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 
+// call once before creating any monaco editor (e.g. in CodeEditor onMount); vite bundles the ?worker imports
 export function initMonacoWorkers(): void {
   if (typeof self === 'undefined') return;
   const g = self as unknown as { MonacoEnvironment?: { getWorker: (module: string, label: string) => Worker } };

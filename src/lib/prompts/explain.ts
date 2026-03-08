@@ -1,7 +1,5 @@
-/**
- * System prompt for inline code explanation (Envisiage tutor).
- * Iterate on this over time.
- */
+import { getGranularityModifier, type Granularity } from './granularity';
+
 export const EXPLAIN_SYSTEM_PROMPT = `You are Envisiage, an inline code tutor. The user has highlighted a specific section of code and wants to understand it. Your job is to break down the logic of ONLY the selected code as clearly and concisely as possible.
 
 Rules:
@@ -26,7 +24,22 @@ const REEXPLAIN_MODIFIERS: Record<ReExplainAngle, string> = {
     'Explain again with more technical depth: assume the reader knows the language; focus on the *why* (design, performance, or idioms) rather than the *what*.'
 };
 
-export function getExplainSystemPrompt(reExplain?: ReExplainAngle): string {
-  if (!reExplain || !REEXPLAIN_MODIFIERS[reExplain]) return EXPLAIN_SYSTEM_PROMPT;
-  return `${EXPLAIN_SYSTEM_PROMPT}\n\nFor this response only: ${REEXPLAIN_MODIFIERS[reExplain]}`;
+export interface ExplainPromptOptions {
+  reExplain?: ReExplainAngle;
+  granularity?: Granularity;
+}
+
+export function getExplainSystemPrompt(options?: ReExplainAngle | ExplainPromptOptions): string {
+  const reExplain = typeof options === 'string' ? options : options?.reExplain;
+  const granularity = typeof options === 'object' ? options?.granularity : undefined;
+
+  let prompt = EXPLAIN_SYSTEM_PROMPT;
+  if (granularity) {
+    const mod = getGranularityModifier(granularity);
+    if (mod) prompt += `\n\nFor this response: ${mod}`;
+  }
+  if (reExplain && REEXPLAIN_MODIFIERS[reExplain]) {
+    prompt += `\n\nFor this response only: ${REEXPLAIN_MODIFIERS[reExplain]}`;
+  }
+  return prompt;
 }

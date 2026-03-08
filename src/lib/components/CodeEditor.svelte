@@ -4,7 +4,7 @@
   import { browser } from '$app/environment';
   import { editorInstance, selectionStore, editorScrollTop } from '$lib/stores/editor';
   import { annotationsStore } from '$lib/stores/annotations';
-  import { hoveredAnnotationId, expandAndScrollToId } from '$lib/stores/ui';
+  import { hoveredAnnotationId, expandAndScrollToId, contextPreviewRanges } from '$lib/stores/ui';
   import { initMonacoWorkers } from '$lib/monaco-workers';
   import type { Annotation } from '$lib/stores/annotations';
   import type * as Monaco from 'monaco-editor';
@@ -14,12 +14,16 @@
 
   let container: HTMLDivElement;
   let editor: Monaco.editor.IStandaloneCodeEditor | null = null;
+  let disposables: { dispose: () => void }[] = [];
   let gutterDecorationIds: string[] = [];
   let highlightDecorationIds: string[] = [];
+  let contextPreviewDecorationIds: string[] = [];
 
   const ENVISIAGE_THEME = 'envisiage-light';
   const GUTTER_CLASS = 'envisiage-gutter-dot';
   const HIGHLIGHT_CLASS = 'envisiage-line-highlight';
+  const CONTEXT_WINDOW_CLASS = 'envisiage-context-window';
+  const CONTEXT_ENCLOSING_CLASS = 'envisiage-context-enclosing';
 
   function defineEnvisiageTheme(monaco: typeof import('monaco-editor')) {
     monaco.editor.defineTheme(ENVISIAGE_THEME, {
@@ -75,20 +79,68 @@
     highlightDecorationIds = model.deltaDecorations(highlightDecorationIds, newDecorations);
   }
 
+  function updateContextPreviewDecoration(
+    editor: Monaco.editor.IStandaloneCodeEditor,
+    ranges: import('$lib/stores/ui').ContextPreviewRanges | null
+  ) {
+    const model = editor.getModel();
+    if (!model) return;
+    if (!ranges) {
+      contextPreviewDecorationIds = model.deltaDecorations(contextPreviewDecorationIds, []);
+      return;
+    }
+    const decos: Monaco.editor.IModelDeltaDecoration[] = [];
+    if (ranges.window) {
+      decos.push({
+        range: {
+          startLineNumber: ranges.window.startLine,
+          startColumn: 1,
+          endLineNumber: ranges.window.endLine,
+          endColumn: model.getLineMaxColumn(ranges.window.endLine)
+        },
+        options: { className: CONTEXT_WINDOW_CLASS, isWholeLine: true }
+      });
+    }
+    if (ranges.enclosing) {
+      decos.push({
+        range: {
+          startLineNumber: ranges.enclosing.startLine,
+          startColumn: 1,
+          endLineNumber: ranges.enclosing.endLine,
+          endColumn: model.getLineMaxColumn(ranges.enclosing.endLine)
+        },
+        options: { className: CONTEXT_ENCLOSING_CLASS, isWholeLine: true }
+      });
+    }
+    contextPreviewDecorationIds = model.deltaDecorations(contextPreviewDecorationIds, decos);
+  }
+
   $: editorRef = $editorInstance;
   $: annotations = $annotationsStore;
   $: hoveredId = $hoveredAnnotationId;
+  $: contextPreview = $contextPreviewRanges;
   $: if (editorRef) {
     updateGutterDecorations(editorRef, annotations);
   }
   $: if (editorRef) {
     updateHighlightDecoration(editorRef, hoveredId, annotations);
   }
+  $: if (editorRef) {
+    updateContextPreviewDecoration(editorRef, contextPreview);
+  }
+
+  $: if (editorRef && monacoModule && language) {
+    const model = editorRef.getModel();
+    if (model) monacoModule.editor.setModelLanguage(model, language);
+  }
+
+  let monacoModule: typeof import('monaco-editor') | null = null;
 
   onMount(async () => {
     if (!browser || !container) return;
 
     const monaco = await import('monaco-editor');
+    monacoModule = monaco;
     initMonacoWorkers();
     defineEnvisiageTheme(monaco);
 
@@ -138,20 +190,21 @@
       }
     });
 
-    // Initial scroll position
-    editorScrollTop.set(editor.getScrollTop());
+    disposables = [selectionDisposable, scrollDisposable, mouseDownDisposable];
 
-    onDestroy(() => {
-      selectionDisposable.dispose();
-      scrollDisposable.dispose();
-      mouseDownDisposable.dispose();
-      if (editor) {
-        editor.dispose();
-        editor = null;
-      }
-      editorInstance.set(null);
-      selectionStore.set(null);
-    });
+    // sync scroll position so overlay cards can align with visible lines
+    editorScrollTop.set(editor.getScrollTop());
+  });
+
+  onDestroy(() => {
+    disposables.forEach((d) => d.dispose());
+    disposables = [];
+    if (editor) {
+      editor.dispose();
+      editor = null;
+    }
+    editorInstance.set(null);
+    selectionStore.set(null);
   });
 
 </script>
@@ -183,5 +236,23 @@
   }
   .editor-wrapper :global(.envisiage-line-highlight) {
     background: var(--ai-teal-glow, rgba(13, 148, 136, 0.12));
+    opacity: 0;
+    animation: envisiage-highlight-fade-in var(--duration-fast, 150ms) var(--ease-out) forwards;
+  }
+
+  @keyframes envisiage-highlight-fade-in {
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* context sent to api when user hovers granularity picker: window = lines above/below, enclosing = scope */
+  .editor-wrapper :global(.envisiage-context-window) {
+    background: rgba(13, 148, 136, 0.06);
+    transition: background var(--duration-fast);
+  }
+  .editor-wrapper :global(.envisiage-context-enclosing) {
+    background: var(--ai-teal-glow, rgba(13, 148, 136, 0.12));
+    transition: background var(--duration-fast);
   }
 </style>
