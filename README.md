@@ -2,8 +2,6 @@
 
 Envisiage is an inline code tutor that runs in the browser. You select code in the built-in Monaco editor and get AI-powered explanations at different granularities—from "explain like I'm 5" to step-by-step and technical breakdowns—with optional follow-up questions. Explanations are streamed in a side panel and powered by Anthropic.
 
----
-
 ## **Prerequisites**
 
 Before you begin, ensure you have the following installed:
@@ -11,8 +9,6 @@ Before you begin, ensure you have the following installed:
 - **Node.js** (v18 or later)
 - **npm** (v9 or later)
 - **AI explanations (optional):** An Anthropic API key. Without it, the explain and follow-up endpoints will return an error when you request an explanation.
-
----
 
 ## **Local Development**
 
@@ -39,7 +35,6 @@ Before you begin, ensure you have the following installed:
 
 5. **Open [http://localhost:5173](http://localhost:5173)** in your browser to see the application.
 
----
 
 ## **Available Scripts**
 
