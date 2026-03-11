@@ -3,14 +3,15 @@
   import { fly } from 'svelte/transition';
   import { fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
-  import { get } from 'svelte/store';
   import { marked } from 'marked';
-  import { editorInstance } from '$lib/stores/editor';
   import { annotationsStore } from '$lib/stores/annotations';
   import { filesStore } from '$lib/stores/files';
   import { expandAndScrollToId, activeAnnotationId } from '$lib/stores/ui';
   import { annotationSummary } from '$lib/utils/summary';
+  import { runReExplain } from '$lib/api/explain';
+  import { submitFollowUp as submitFollowUpApi } from '$lib/api/followup';
   import type { Annotation } from '$lib/stores/annotations';
+  import type { ReExplainVariant } from '$lib/api/explain';
 
   const flyParams = { x: 24, duration: 300, easing: cubicOut };
   const wordFadeParams = { duration: 100 };
@@ -86,7 +87,7 @@
       toggleCollapsed(annotation);
     }
     const target = e.target as HTMLElement;
-    if (target.closest('.card-dismiss') || target.closest('.card-pin-btn')) return;
+    if (target.closest('.card-dismiss')) return;
   }
 
   function renderedHtml(text: string): string {
@@ -107,139 +108,33 @@
     followUpSubmitting[annotationId] = true;
     followUpSubmitting = followUpSubmitting;
 
-    annotationsStore.appendUserMessage(annotationId, q);
-    annotationsStore.startAssistantReply(annotationId);
-
     tick().then(() => scrollCardToBottom(annotationId));
 
-    const list = get(annotationsStore);
-    const ann = list.find((a) => a.id === annotationId);
-    if (!ann) {
+    try {
+      await submitFollowUpApi(annotationId, q);
+    } finally {
       followUpSubmitting[annotationId] = false;
       followUpSubmitting = followUpSubmitting;
-      return;
     }
-    // send only prior messages; the last two (new user msg + empty assistant) are excluded for the api
-    const threadForApi = ann.thread.slice(0, -2).map((m) => ({ role: m.role, content: m.content }));
-
-    try {
-      const res = await fetch('/api/followup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedText: ann.selectedText,
-          explanation: ann.explanation,
-          thread: threadForApi,
-          question: q
-        })
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }));
-        annotationsStore.setThreadError(annotationId, err.error ?? res.statusText);
-        followUpSubmitting[annotationId] = false;
-        followUpSubmitting = followUpSubmitting;
-        return;
-      }
-      const reader = res.body?.getReader();
-      if (!reader) {
-        annotationsStore.setThreadError(annotationId, 'No response body');
-        followUpSubmitting[annotationId] = false;
-        followUpSubmitting = followUpSubmitting;
-        return;
-      }
-      const decoder = new TextDecoder();
-      let done = false;
-      while (!done) {
-        const { value, done: d } = await reader.read();
-        done = d;
-        if (value)
-          annotationsStore.appendAssistantReplyChunk(
-            annotationId,
-            decoder.decode(value, { stream: true })
-          );
-      }
-    } catch (err) {
-      annotationsStore.setThreadError(
-        annotationId,
-        err instanceof Error ? err.message : 'Request failed'
-      );
-    }
-    followUpSubmitting[annotationId] = false;
-    followUpSubmitting = followUpSubmitting;
   }
 
-  async function reExplain(annotationId: string) {
+  async function handleReExplainVariant(annotationId: string, variant: ReExplainVariant) {
     if (reExplainSubmitting[annotationId]) return;
-    const list = get(annotationsStore);
-    const ann = list.find((a) => a.id === annotationId);
-    if (!ann) return;
-    const ed = get(editorInstance);
-    const model = ed?.getModel();
-    const code = model?.getValue() ?? ann.selectedText;
-    const lineCount = model?.getLineCount() ?? 1;
-    const contextFrom = Math.max(1, ann.selectionRange.startLine - 10);
-    const contextTo = Math.min(lineCount, ann.selectionRange.endLine + 10);
-    const fullContext =
-      model?.getValueInRange({
-        startLineNumber: contextFrom,
-        startColumn: 1,
-        endLineNumber: contextTo,
-        endColumn: model.getLineMaxColumn(contextTo)
-      }) ?? ann.selectedText;
-    const language = model?.getLanguageId?.() ?? 'javascript';
-
     reExplainSubmitting[annotationId] = true;
     reExplainSubmitting = reExplainSubmitting;
-    annotationsStore.setExplanation(annotationId, '');
-    annotationsStore.setStatus(annotationId, 'loading');
-
     try {
-      const res = await fetch('/api/explain', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code,
-          selection: ann.selectedText,
-          fullContext,
-          language,
-          reExplain: 'different'
-        })
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }));
-        annotationsStore.setError(annotationId, err.error ?? res.statusText);
-        reExplainSubmitting[annotationId] = false;
-        reExplainSubmitting = reExplainSubmitting;
-        return;
-      }
-      const reader = res.body?.getReader();
-      if (!reader) {
-        annotationsStore.setError(annotationId, 'No response body');
-        reExplainSubmitting[annotationId] = false;
-        reExplainSubmitting = reExplainSubmitting;
-        return;
-      }
-      const decoder = new TextDecoder();
-      let done = false;
-      while (!done) {
-        const { value, done: d } = await reader.read();
-        done = d;
-        if (value)
-          annotationsStore.appendExplanation(
-            annotationId,
-            decoder.decode(value, { stream: true })
-          );
-      }
-      annotationsStore.setStatus(annotationId, 'complete');
-    } catch (err) {
-      annotationsStore.setError(
-        annotationId,
-        err instanceof Error ? err.message : 'Request failed'
-      );
+      await runReExplain(annotationId, variant);
+    } finally {
+      reExplainSubmitting[annotationId] = false;
+      reExplainSubmitting = reExplainSubmitting;
     }
-    reExplainSubmitting[annotationId] = false;
-    reExplainSubmitting = reExplainSubmitting;
   }
+
+  const REEXPLAIN_VARIANTS: { value: ReExplainVariant; label: string }[] = [
+    { value: 'simpler', label: 'Simpler' },
+    { value: 'technical', label: 'Technical' },
+    { value: 'different', label: 'Different angle' }
+  ];
 </script>
 
 <div class="overlay">
@@ -275,9 +170,6 @@
           {#if annotation.status === 'collapsed'}
             <div class="card-summary-row">
               <p class="card-summary">{annotationSummary(annotation.explanation)}</p>
-              {#if annotation.pinned}
-                <span class="card-pinned-badge" aria-label="Pinned to editor">Pinned</span>
-              {/if}
               {#if annotation.thread.length > 0}
                 <span class="card-thread-badge" aria-label="{annotation.thread.length} follow-up messages">
                   {annotation.thread.length}
@@ -328,31 +220,18 @@
               >
                 −
               </button>
-              <button
-                type="button"
-                class="card-reexplain-btn"
-                aria-label="Re-explain from a different angle"
-                disabled={reExplainSubmitting[annotation.id]}
-                on:click|stopPropagation={() => reExplain(annotation.id)}
-              >
-                {reExplainSubmitting[annotation.id] ? '…' : 'Re-explain'}
-              </button>
+              {#each REEXPLAIN_VARIANTS as { value, label }}
+                <button
+                  type="button"
+                  class="card-reexplain-btn"
+                  aria-label="Re-explain: {label}"
+                  disabled={reExplainSubmitting[annotation.id]}
+                  on:click|stopPropagation={() => handleReExplainVariant(annotation.id, value)}
+                >
+                  {reExplainSubmitting[annotation.id] ? '…' : label}
+                </button>
+              {/each}
             {/if}
-            <button
-              type="button"
-              class="card-pin-btn"
-              class:pinned={annotation.pinned}
-              aria-label={annotation.pinned ? 'Unpin from editor' : 'Pin to editor'}
-              on:click|stopPropagation={() => annotationsStore.togglePinned(annotation.id)}
-            >
-              <span class="card-pin-icon" aria-hidden="true">
-                {#if annotation.pinned}
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
-                {:else}
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
-                {/if}
-              </span>
-            </button>
             <button
               type="button"
               class="card-dismiss"
@@ -721,7 +600,6 @@
 
   .card-collapse-btn,
   .card-reexplain-btn,
-  .card-pin-btn,
   .card-dismiss {
     background: none;
     border: none;
@@ -742,46 +620,15 @@
     font-size: 12px;
   }
 
-  .card-pin-btn {
-    padding: var(--space-xs, 4px);
-  }
-
-  .card-pin-btn .card-pin-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .card-pin-btn.pinned {
-    color: var(--ai-teal, #0d9488);
-  }
-
   .card-collapse-btn:hover,
   .card-reexplain-btn:hover:not(:disabled),
-  .card-pin-btn:hover,
   .card-dismiss:hover {
     color: var(--text-primary, #1a1a1a);
     background: var(--bg-secondary, #f2f2f2);
   }
 
-  .card-pin-btn.pinned:hover {
-    color: var(--ai-teal, #0d9488);
-  }
-
   .card-reexplain-btn:disabled {
     opacity: 0.7;
     cursor: wait;
-  }
-
-  .card-pinned-badge {
-    flex-shrink: 0;
-    font-size: 10px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-    color: var(--ai-teal, #0d9488);
-    background: var(--ai-teal-muted, #f0fdfa);
-    padding: 2px 6px;
-    border-radius: 4px;
   }
 </style>

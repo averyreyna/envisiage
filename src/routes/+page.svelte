@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { browser } from '$app/environment';
   import CodeEditor from '$lib/components/CodeEditor.svelte';
   import AnnotationOverlay from '$lib/components/AnnotationOverlay.svelte';
   import TopBar from '$lib/components/TopBar.svelte';
@@ -10,7 +11,7 @@
   import { annotationsStore } from '$lib/stores/annotations';
   import { filesStore } from '$lib/stores/files';
   import { languageStore } from '$lib/stores/language';
-  import { panelVisible, activeAnnotationId, panelWidth, setPanelWidth } from '$lib/stores/ui';
+  import { panelVisible, activeAnnotationId, panelWidth, setPanelWidth, floatingExplainRect } from '$lib/stores/ui';
   import { getSmartContext } from '$lib/utils/context';
   import type { Granularity } from '$lib/prompts/granularity';
   import type { SelectionRange } from '$lib/stores/editor';
@@ -156,15 +157,19 @@
     };
   });
   onDestroy(() => {
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
+    if (browser) {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
   });
-  $: if (resizing) {
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  } else {
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
+  $: if (browser) {
+    if (resizing) {
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
   }
 </script>
 
@@ -176,10 +181,11 @@
   <main class="main">
     <section class="editor-section">
       <CodeEditor {files} {activeFileId} />
-      {#if $selectionStore && !pendingTrigger}
+      {#if $floatingExplainRect && !pendingTrigger}
         <button
           type="button"
           class="trigger-btn"
+          style="top: {$floatingExplainRect.top}px; left: {$floatingExplainRect.left}px;"
           on:click={openGranularityPicker}
           title="Add annotation (⌘⇧E / Ctrl+Shift+E)"
         >
@@ -345,8 +351,6 @@
 
   .trigger-btn {
     position: absolute;
-    bottom: var(--space-lg);
-    right: var(--space-lg);
     padding: var(--space-sm) var(--space-md);
     font-size: var(--font-size-sm);
     font-family: var(--font-ui);

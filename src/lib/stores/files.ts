@@ -46,6 +46,75 @@ const items = [{ id: 1, qty: 2 }, { id: 2, qty: 1 }];
 const total = items.reduce((acc, { qty, ...rest }) => acc + qty, 0);
 `;
 
+/** Python placeholder with easy, medium, and hard code blocks. */
+const DEFAULT_PYTHON_CODE = `# Select some code and press ⌘⇧E (Mac) or Ctrl+Shift+E (Win) to add an inline annotation.
+
+# --- Easy: basics ---
+name = "World"
+print(f"Hello, {name}!")
+
+def greet(who):
+    return f"Hi, {who}"
+
+for i in range(3):
+    print(greet(name))
+
+# --- Medium: comprehensions, context managers, dataclasses ---
+squares = [n * n for n in range(10)]
+evens = [x for x in squares if x % 2 == 0]
+
+from contextlib import contextmanager
+
+@contextmanager
+def managed_file(path):
+    f = open(path, "w")
+    try:
+        yield f
+    finally:
+        f.close()
+
+from dataclasses import dataclass
+
+@dataclass
+class Point:
+    x: float
+    y: float
+
+    def distance(self, other: "Point") -> float:
+        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
+
+# --- Hard: async, generators, type hints, decorators ---
+import asyncio
+from typing import Iterator, TypeVar
+
+T = TypeVar("T")
+
+async def fetch_all(urls: list[str]) -> list[str]:
+    async def one(url: str) -> str:
+        await asyncio.sleep(0.1)
+        return url.upper()
+    return await asyncio.gather(*[one(u) for u in urls])
+
+def fib(n: int) -> Iterator[int]:
+    a, b = 0, 1
+    for _ in range(n):
+        yield a
+        a, b = b, a + b
+
+def memoize(fn):
+    cache: dict = {}
+    def wrapper(*args):
+        key = tuple(args)
+        if key not in cache:
+            cache[key] = fn(*args)
+        return cache[key]
+    return wrapper
+
+@memoize
+def expensive(n: int) -> int:
+    return n * n
+`;
+
 export interface FileEntry {
   id: string;
   path: string;
@@ -90,6 +159,23 @@ function generateId(): string {
   return `file-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** Returns the default file set on fresh start: index.js (existing placeholder) + example.py (varying difficulty). */
+function getDefaultFiles(): FileEntry[] {
+  const jsFile: FileEntry = {
+    id: generateId(),
+    path: 'index.js',
+    content: DEFAULT_INITIAL_CODE,
+    language: 'javascript'
+  };
+  const pyFile: FileEntry = {
+    id: generateId(),
+    path: 'example.py',
+    content: DEFAULT_PYTHON_CODE,
+    language: 'python'
+  };
+  return [jsFile, pyFile];
+}
+
 function languageFromPath(path: string): LanguageId {
   const ext = path.split('.').pop()?.toLowerCase() ?? '';
   return EXTENSION_TO_LANGUAGE[ext] ?? 'javascript';
@@ -97,24 +183,14 @@ function languageFromPath(path: string): LanguageId {
 
 function loadFromStorage(): { files: FileEntry[]; activeFileId: string | null } {
   if (!browser || typeof localStorage === 'undefined') {
-    const defaultFile: FileEntry = {
-      id: generateId(),
-      path: 'index.js',
-      content: DEFAULT_INITIAL_CODE,
-      language: 'javascript'
-    };
-    return { files: [defaultFile], activeFileId: defaultFile.id };
+    const defaultFiles = getDefaultFiles();
+    return { files: defaultFiles, activeFileId: defaultFiles[0].id };
   }
   try {
     const s = localStorage.getItem(STORAGE_KEY);
     if (!s) {
-      const defaultFile: FileEntry = {
-        id: generateId(),
-        path: 'index.js',
-        content: DEFAULT_INITIAL_CODE,
-        language: 'javascript'
-      };
-      return { files: [defaultFile], activeFileId: defaultFile.id };
+      const defaultFiles = getDefaultFiles();
+      return { files: defaultFiles, activeFileId: defaultFiles[0].id };
     }
     const parsed = JSON.parse(s) as unknown;
     if (
@@ -122,13 +198,8 @@ function loadFromStorage(): { files: FileEntry[]; activeFileId: string | null } 
       typeof parsed !== 'object' ||
       !Array.isArray((parsed as { files?: unknown }).files)
     ) {
-      const defaultFile: FileEntry = {
-        id: generateId(),
-        path: 'index.js',
-        content: DEFAULT_INITIAL_CODE,
-        language: 'javascript'
-      };
-      return { files: [defaultFile], activeFileId: defaultFile.id };
+      const defaultFiles = getDefaultFiles();
+      return { files: defaultFiles, activeFileId: defaultFiles[0].id };
     }
     const { files, activeFileId } = parsed as { files: unknown[]; activeFileId: string | null };
     const validFiles = files.filter(
@@ -140,14 +211,9 @@ function loadFromStorage(): { files: FileEntry[]; activeFileId: string | null } 
         typeof (f as FileEntry).content === 'string' &&
         typeof (f as FileEntry).language === 'string'
     );
-    if (validFiles.length === 0) {
-      const defaultFile: FileEntry = {
-        id: generateId(),
-        path: 'index.js',
-        content: DEFAULT_INITIAL_CODE,
-        language: 'javascript'
-      };
-      return { files: [defaultFile], activeFileId: defaultFile.id };
+    const defaultFiles = getDefaultFiles();
+    if (validFiles.length < defaultFiles.length) {
+      return { files: defaultFiles, activeFileId: defaultFiles[0].id };
     }
     const activeId =
       typeof activeFileId === 'string' && validFiles.some((f) => f.id === activeFileId)
@@ -155,13 +221,8 @@ function loadFromStorage(): { files: FileEntry[]; activeFileId: string | null } 
         : validFiles[0].id;
     return { files: validFiles, activeFileId: activeId };
   } catch {
-    const defaultFile: FileEntry = {
-      id: generateId(),
-      path: 'index.js',
-      content: DEFAULT_INITIAL_CODE,
-      language: 'javascript'
-    };
-    return { files: [defaultFile], activeFileId: defaultFile.id };
+    const defaultFiles = getDefaultFiles();
+    return { files: defaultFiles, activeFileId: defaultFiles[0].id };
   }
 }
 

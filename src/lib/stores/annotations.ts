@@ -20,7 +20,6 @@ export interface Annotation {
   status: AnnotationStatus;
   timestamp: number;
   thread: ThreadMessage[];
-  pinned?: boolean;
 }
 
 const STORAGE_KEY = 'envisiage-annotations';
@@ -56,8 +55,7 @@ function loadFromSession(): Annotation[] {
       )
       .map((a) => ({
         ...a,
-        fileId: typeof a.fileId === 'string' ? a.fileId : LEGACY_DEFAULT_FILE_ID,
-        pinned: (a as { pinned?: boolean }).pinned === true
+        fileId: typeof a.fileId === 'string' ? a.fileId : LEGACY_DEFAULT_FILE_ID
       }));
   } catch {
     return [];
@@ -95,23 +93,13 @@ function createAnnotationsStore() {
             explanation: '',
             status: 'loading' as AnnotationStatus,
             timestamp: Date.now(),
-            thread: [],
-            pinned: false
+            thread: []
           }
         ];
         save(next);
         return next;
       });
       return id;
-    },
-    togglePinned: (id: string) => {
-      update((list) => {
-        const next = list.map((a) =>
-          a.id === id ? { ...a, pinned: !a.pinned } : a
-        );
-        save(next);
-        return next;
-      });
     },
     remove: (id: string) => {
       update((list) => {

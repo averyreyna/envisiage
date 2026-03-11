@@ -17,6 +17,38 @@
     return segments[segments.length - 1] || path;
   }
 
+  function fileExtension(path: string): string {
+    const name = fileName(path);
+    const dot = name.lastIndexOf('.');
+    return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  }
+
+  /** Icon color and optional label for common file types (VS Code–style) */
+  const EXTENSION_STYLES: Record<string, { color: string }> = {
+    js: { color: '#f7df1e' },
+    jsx: { color: '#61dafb' },
+    ts: { color: '#3178c6' },
+    tsx: { color: '#3178c6' },
+    css: { color: '#264de4' },
+    scss: { color: '#cc6699' },
+    sass: { color: '#cc6699' },
+    html: { color: '#e34f26' },
+    json: { color: '#cbcb41' },
+    md: { color: '#083fa1' },
+    mdx: { color: '#f9ac00' },
+    py: { color: '#3776ab' },
+    vue: { color: '#42b883' },
+    svelte: { color: '#ff3e00' },
+    yaml: { color: '#cb171e' },
+    yml: { color: '#cb171e' },
+    svg: { color: '#ffb13b' },
+  };
+
+  function getExtensionStyle(path: string): { color: string } {
+    const ext = fileExtension(path);
+    return EXTENSION_STYLES[ext] ?? { color: 'var(--text-muted)' };
+  }
+
   function sanitizePath(value: string): string {
     return value.trim().replace(/[/\\]/g, '') || 'untitled.js';
   }
@@ -100,6 +132,16 @@
             on:click|stopPropagation
           />
         {:else}
+          <span
+            class="tab-icon"
+            style="--icon-color: {getExtensionStyle(file.path).color}"
+            aria-hidden="true"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16" fill="none">
+              <path d="M1 2a1 1 0 0 1 1-1h7l3 3v10a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2Z" fill="var(--icon-color)" opacity="0.2" />
+              <path d="M9 1v3a1 1 0 0 0 1 1h3" stroke="var(--icon-color)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            </svg>
+          </span>
           <span class="tab-label">{fileName(file.path)}</span>
         {/if}
         <button
@@ -176,6 +218,16 @@
     max-width: 160px;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .tab-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .tab-icon svg {
+    display: block;
   }
 
   .tab.editing {
