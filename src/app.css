@@ -1,6 +1,3 @@
-/* Envisiage design tokens — PLAN.md */
-
-/* ABC Diatype — UI font (non-code text) */
 @font-face {
   font-family: 'ABC Diatype';
   src: url('/fonts/ABC%20Diatype/ABCDiatype-Regular-Trial.woff2') format('woff2');
@@ -52,6 +49,7 @@
   --ai-teal-light: #ccfbf1;
   --ai-teal-muted: #f0fdfa;
   --ai-teal-glow: rgba(13, 148, 136, 0.12);
+  --ai-teal-fill: rgba(204, 251, 241, 0.75);
   --ai-green: #059669;
   --ai-green-light: #d1fae5;
 

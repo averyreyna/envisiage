@@ -5,9 +5,10 @@
   import { cubicOut } from 'svelte/easing';
   import { get } from 'svelte/store';
   import { marked } from 'marked';
-  import { editorInstance, editorScrollTop } from '$lib/stores/editor';
+  import { editorInstance } from '$lib/stores/editor';
   import { annotationsStore } from '$lib/stores/annotations';
-  import { hoveredAnnotationId, expandAndScrollToId, activeAnnotationId } from '$lib/stores/ui';
+  import { filesStore } from '$lib/stores/files';
+  import { expandAndScrollToId, activeAnnotationId } from '$lib/stores/ui';
   import { annotationSummary } from '$lib/utils/summary';
   import type { Annotation } from '$lib/stores/annotations';
 
@@ -20,38 +21,37 @@
     return text.split(/(\s+)/).filter(Boolean);
   }
 
-  $: editor = $editorInstance;
-  $: scrollTop = $editorScrollTop;
-  $: annotations = $annotationsStore;
-  $: hoveredId = $hoveredAnnotationId;
+  const activeFileIdStore = filesStore.activeFileId;
+  $: activeFileId = $activeFileIdStore;
+  $: annotations =
+    activeFileId != null
+      ? $annotationsStore.filter((a) => a.fileId === activeFileId)
+      : [];
   $: expandId = $expandAndScrollToId;
+
+  // Snap to and follow the AI reply while streaming a follow-up
+  $: annotations, followUpSubmitting;
+  $: if (annotations.length) {
+    for (const ann of annotations) {
+      if (followUpSubmitting[ann.id]) {
+        const el = cardScrollRefs[ann.id];
+        if (el) {
+          el.scrollTop = el.scrollHeight;
+        }
+      }
+    }
+  }
 
   let followUpInputs: Record<string, string> = {};
   let followUpSubmitting: Record<string, boolean> = {};
   let reExplainSubmitting: Record<string, boolean> = {};
+  let cardScrollRefs: Record<string, HTMLDivElement> = {};
 
-  function rangesOverlap(
-    a: { startLine: number; endLine: number },
-    b: { startLine: number; endLine: number }
-  ): boolean {
-    return a.startLine <= b.endLine && b.startLine <= a.endLine;
+  function lineLabel(range: { startLine: number; endLine: number }): string {
+    return range.startLine === range.endLine
+      ? `Line ${range.startLine}`
+      : `Lines ${range.startLine}–${range.endLine}`;
   }
-
-  $: positions = editor
-    ? annotations.map((annotation, index) => {
-        const baseTop =
-          editor.getTopForLineNumber(annotation.selectionRange.startLine) - scrollTop;
-        const stackOffset = annotations
-          .slice(0, index)
-          .filter((other) =>
-            rangesOverlap(annotation.selectionRange, other.selectionRange)
-          ).length;
-        const top = baseTop + stackOffset * 40;
-        const isHovered = hoveredId === annotation.id;
-        const zIndex = 10 + (isHovered ? 100 : 0) + (annotations.length - index);
-        return { annotation, top, zIndex };
-      })
-    : [];
 
   $: if (expandId) {
     const id = expandId;
@@ -86,12 +86,17 @@
       toggleCollapsed(annotation);
     }
     const target = e.target as HTMLElement;
-    if (target.closest('.card-dismiss')) return;
+    if (target.closest('.card-dismiss') || target.closest('.card-pin-btn')) return;
   }
 
   function renderedHtml(text: string): string {
     if (!text.trim()) return '';
     return marked.parse(text, { async: false }) as string;
+  }
+
+  function scrollCardToBottom(annotationId: string) {
+    const el = cardScrollRefs[annotationId];
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }
 
   async function submitFollowUp(annotationId: string) {
@@ -104,6 +109,8 @@
 
     annotationsStore.appendUserMessage(annotationId, q);
     annotationsStore.startAssistantReply(annotationId);
+
+    tick().then(() => scrollCardToBottom(annotationId));
 
     const list = get(annotationsStore);
     const ann = list.find((a) => a.id === annotationId);
@@ -236,10 +243,9 @@
 </script>
 
 <div class="overlay">
-  {#each positions as { annotation, top, zIndex } (annotation.id)}
+  {#each annotations as annotation (annotation.id)}
     <div
       class="card-wrapper"
-      style="top: {top}px; z-index: {zIndex}"
       in:fly={flyParams}
       out:fly={flyParams}
     >
@@ -252,8 +258,6 @@
         role={annotation.status === 'collapsed' ? 'button' : 'region'}
         aria-label="Annotation at line {annotation.selectionRange.startLine}"
         tabindex={annotation.status === 'collapsed' ? 0 : -1}
-        on:mouseenter={() => hoveredAnnotationId.set(annotation.id)}
-        on:mouseleave={() => hoveredAnnotationId.set(null)}
         on:click={(e) => handleCardClick(annotation, e)}
         on:keydown={(e) => {
           if (annotation.status === 'collapsed' && (e.key === 'Enter' || e.key === ' ')) {
@@ -267,9 +271,13 @@
         {/if}
         <div class="card-accent"></div>
         <div class="card-body">
+          <span class="card-line-badge" aria-hidden="true">{lineLabel(annotation.selectionRange)}</span>
           {#if annotation.status === 'collapsed'}
             <div class="card-summary-row">
               <p class="card-summary">{annotationSummary(annotation.explanation)}</p>
+              {#if annotation.pinned}
+                <span class="card-pinned-badge" aria-label="Pinned to editor">Pinned</span>
+              {/if}
               {#if annotation.thread.length > 0}
                 <span class="card-thread-badge" aria-label="{annotation.thread.length} follow-up messages">
                   {annotation.thread.length}
@@ -277,7 +285,7 @@
               {/if}
             </div>
           {:else}
-            <div class="card-scroll">
+            <div class="card-scroll" bind:this={cardScrollRefs[annotation.id]}>
               <div class="card-content">
                 {#if annotation.status === 'loading'}
                   <p class="card-loading-text">Thinking…</p>
@@ -332,6 +340,21 @@
             {/if}
             <button
               type="button"
+              class="card-pin-btn"
+              class:pinned={annotation.pinned}
+              aria-label={annotation.pinned ? 'Unpin from editor' : 'Pin to editor'}
+              on:click|stopPropagation={() => annotationsStore.togglePinned(annotation.id)}
+            >
+              <span class="card-pin-icon" aria-hidden="true">
+                {#if annotation.pinned}
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+                {:else}
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+                {/if}
+              </span>
+            </button>
+            <button
+              type="button"
               class="card-dismiss"
               aria-label="Remove annotation"
               on:click|stopPropagation={() => remove(annotation.id)}
@@ -371,34 +394,48 @@
 
 <style>
   .overlay {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md, 16px);
+    padding: var(--space-md, 16px) var(--space-sm, 8px);
     overflow-y: auto;
     overflow-x: hidden;
-    flex-shrink: 0;
+    min-height: 0;
+    flex: 1;
+    width: 100%;
+    min-width: 200px;
   }
 
   .card-wrapper {
-    position: absolute;
-    left: var(--space-sm, 8px);
-    right: var(--space-sm, 8px);
-    transition: top var(--duration-normal, 250ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+    flex-shrink: 0;
+  }
+
+  .card-line-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted, #9b9b9b);
+    margin-bottom: var(--space-xs, 4px);
   }
 
   .card {
     position: relative;
     left: 0;
     right: 0;
-    max-height: 320px;
+    max-height: 520px;
     min-height: 48px;
-    background: var(--bg-editor, #fff);
+    background: var(--ai-teal-fill, rgba(204, 251, 241, 0.75));
     border: 1px solid var(--border-default, #e5e5e5);
     border-radius: 6px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
     display: flex;
     cursor: default;
+  }
+
+  @media (max-width: 767px) {
+    .card:not(.card-collapsed) {
+      max-height: 320px;
+    }
   }
 
   .card-collapsed {
@@ -684,6 +721,7 @@
 
   .card-collapse-btn,
   .card-reexplain-btn,
+  .card-pin-btn,
   .card-dismiss {
     background: none;
     border: none;
@@ -704,15 +742,46 @@
     font-size: 12px;
   }
 
+  .card-pin-btn {
+    padding: var(--space-xs, 4px);
+  }
+
+  .card-pin-btn .card-pin-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .card-pin-btn.pinned {
+    color: var(--ai-teal, #0d9488);
+  }
+
   .card-collapse-btn:hover,
   .card-reexplain-btn:hover:not(:disabled),
+  .card-pin-btn:hover,
   .card-dismiss:hover {
     color: var(--text-primary, #1a1a1a);
     background: var(--bg-secondary, #f2f2f2);
   }
 
+  .card-pin-btn.pinned:hover {
+    color: var(--ai-teal, #0d9488);
+  }
+
   .card-reexplain-btn:disabled {
     opacity: 0.7;
     cursor: wait;
+  }
+
+  .card-pinned-badge {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--ai-teal, #0d9488);
+    background: var(--ai-teal-muted, #f0fdfa);
+    padding: 2px 6px;
+    border-radius: 4px;
   }
 </style>

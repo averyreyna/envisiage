@@ -1,11 +1,31 @@
 <script lang="ts">
+  import { get } from 'svelte/store';
   import { languageStore, SUPPORTED_LANGUAGES, type LanguageId } from '$lib/stores/language';
+  import { filesStore, pathWithExtension } from '$lib/stores/files';
 
   let showOnboarding = false;
 
+  const filesStoreFiles = filesStore.files;
+  const filesStoreActiveId = filesStore.activeFileId;
+  $: files = $filesStoreFiles;
+  $: activeFileId = $filesStoreActiveId;
+  $: activeFile = activeFileId != null ? files.find((f) => f.id === activeFileId) ?? null : null;
+  $: languageValue = activeFile?.language ?? 'javascript';
+
   function handleLanguageChange(e: Event) {
     const value = (e.currentTarget as HTMLSelectElement)?.value;
-    languageStore.set((value as LanguageId) || 'javascript');
+    const lang = (value as LanguageId) || 'javascript';
+    const currentActiveId = get(filesStore.activeFileId);
+    const currentFiles = get(filesStore.files);
+    const currentFile = currentActiveId
+      ? currentFiles.find((f) => f.id === currentActiveId)
+      : null;
+    if (currentActiveId && currentFile) {
+      const newPath = pathWithExtension(currentFile.path, lang);
+      filesStore.renameFile(currentActiveId, newPath);
+    } else {
+      languageStore.set(lang);
+    }
   }
 
   function toggleOnboarding() {
@@ -23,14 +43,17 @@
 <svelte:window on:click={closeOnboarding} />
 
 <header class="topbar">
-  <span class="wordmark">envisiage</span>
+  <div class="header-block">
+    <span class="wordmark">Envisiage</span>
+    <span class="subheader">Powered by Sonnet 4.5</span>
+  </div>
   <div class="controls">
     <label for="lang-select" class="sr-only">Language</label>
     <select
       id="lang-select"
       class="lang-select"
       aria-label="Code language"
-      value={$languageStore}
+      value={languageValue}
       on:change={handleLanguageChange}
     >
       {#each SUPPORTED_LANGUAGES as { id, label }}
@@ -63,17 +86,28 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 48px;
+    height: 56px;
     padding: 0 var(--space-md);
     background: var(--bg-primary);
-    border-bottom: 1px solid var(--border-default);
     flex-shrink: 0;
   }
 
   .wordmark {
-    font-size: var(--font-size-base);
+    font-size: var(--font-size-lg);
     font-weight: 500;
     color: var(--text-secondary);
+    font-family: var(--font-ui);
+  }
+
+  .header-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .subheader {
+    font-size: var(--font-size-base);
+    color: var(--text-muted);
     font-family: var(--font-ui);
   }
 

@@ -1,27 +1,24 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
   import CodeEditor from '$lib/components/CodeEditor.svelte';
   import AnnotationOverlay from '$lib/components/AnnotationOverlay.svelte';
   import TopBar from '$lib/components/TopBar.svelte';
+  import FileTabs from '$lib/components/FileTabs.svelte';
   import GranularityPicker from '$lib/components/GranularityPicker.svelte';
   import EmptyState from '$lib/components/EmptyState.svelte';
   import { editorInstance, selectionStore } from '$lib/stores/editor';
   import { annotationsStore } from '$lib/stores/annotations';
+  import { filesStore } from '$lib/stores/files';
   import { languageStore } from '$lib/stores/language';
-  import { panelVisible, activeAnnotationId } from '$lib/stores/ui';
+  import { panelVisible, activeAnnotationId, panelWidth, setPanelWidth } from '$lib/stores/ui';
   import { getSmartContext } from '$lib/utils/context';
   import type { Granularity } from '$lib/prompts/granularity';
   import type { SelectionRange } from '$lib/stores/editor';
 
-  const initialCode = `// Select some code and press ⌘⇧E (Mac) or Ctrl+Shift+E (Win)
-// to add an inline annotation.
-
-function greet(name) {
-  return \`Hello, \${name}!\`;
-}
-
-const result = [1, 2, 3].map((x) => x * 2);
-console.log(result);
-`;
+  const filesStoreFiles = filesStore.files;
+  const filesStoreActiveId = filesStore.activeFileId;
+  $: files = $filesStoreFiles;
+  $: activeFileId = $filesStoreActiveId;
 
   interface PendingTrigger {
     selection: SelectionRange;
@@ -35,7 +32,7 @@ console.log(result);
   function openGranularityPicker() {
     const editor = $editorInstance;
     const selection = $selectionStore;
-    if (!editor || !selection) return;
+    if (!editor || !selection || !activeFileId) return;
     const hasSelection =
       selection.startLine !== selection.endLine ||
       selection.startCol !== selection.endCol;
@@ -67,9 +64,9 @@ console.log(result);
     if (!pending) return;
 
     const { selection, selectedText, code, smartContext } = pending;
-    const language = $languageStore;
+    const language = files.find((f) => f.id === activeFileId)?.language ?? $languageStore;
 
-    const id = annotationsStore.add(selection, selectedText);
+    const id = annotationsStore.add(activeFileId, selection, selectedText);
 
     try {
       const res = await fetch('/api/explain', {
@@ -133,15 +130,52 @@ console.log(result);
   function handleGranularitySelect(e: CustomEvent<{ granularity: Granularity }>) {
     runExplain(e.detail.granularity);
   }
+
+  let resizing = false;
+  function startResize() {
+    resizing = true;
+  }
+  function onResizeMove(e: MouseEvent) {
+    if (!resizing) return;
+    const main = document.querySelector('.main');
+    if (!main) return;
+    const rect = main.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const widthFromRight = rect.width - x;
+    setPanelWidth(widthFromRight);
+  }
+  function stopResize() {
+    resizing = false;
+  }
+  onMount(() => {
+    window.addEventListener('mousemove', onResizeMove);
+    window.addEventListener('mouseup', stopResize);
+    return () => {
+      window.removeEventListener('mousemove', onResizeMove);
+      window.removeEventListener('mouseup', stopResize);
+    };
+  });
+  onDestroy(() => {
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+  $: if (resizing) {
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  } else {
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
 
 <div class="app">
   <TopBar />
+  <FileTabs />
   <main class="main">
     <section class="editor-section">
-      <CodeEditor code={initialCode} language={$languageStore} />
+      <CodeEditor {files} {activeFileId} />
       {#if $selectionStore && !pendingTrigger}
         <button
           type="button"
@@ -170,8 +204,16 @@ console.log(result);
       {/if}
     </section>
     {#if $panelVisible}
-      <aside class="overlay-section">
-        {#if $annotationsStore.length === 0}
+      <button
+        type="button"
+        class="resize-handle"
+        aria-label="Resize explanation panel"
+        on:mousedown|preventDefault={startResize}
+      ></button>
+      <aside class="overlay-section" style="--panel-width: {$panelWidth}px;">
+        {#if activeFileId != null && $annotationsStore.filter((a) => a.fileId === activeFileId).length === 0}
+          <EmptyState />
+        {:else if activeFileId == null}
           <EmptyState />
         {:else}
           <AnnotationOverlay />
@@ -206,23 +248,53 @@ console.log(result);
   }
 
   .overlay-section {
-    width: 320px;
-    max-width: 35%;
+    flex-shrink: 0;
+    width: var(--panel-width, 400px);
+    max-width: 50%;
     min-width: 280px;
+    min-height: 0;
     background: var(--bg-primary);
     border-left: 1px solid var(--border-default);
     display: flex;
     flex-direction: column;
   }
 
+  .resize-handle {
+    flex-shrink: 0;
+    width: 6px;
+    min-width: 6px;
+    background: transparent;
+    border: none;
+    cursor: col-resize;
+    padding: 0;
+    margin: 0;
+    position: relative;
+  }
+
+  .resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 2px;
+    background: var(--border-subtle, #efefef);
+    border-radius: 1px;
+    transition: background var(--duration-fast);
+  }
+
+  .resize-handle:hover::after,
+  .resize-handle:focus-visible::after {
+    background: var(--ai-teal, #0d9488);
+  }
+
   @media (min-width: 1200px) {
     .editor-section {
-      flex: 0 0 65%;
+      flex: 1;
+      min-width: 0;
     }
     .overlay-section {
-      flex: 0 0 35%;
-      max-width: none;
-      width: auto;
+      max-width: 720px;
     }
   }
 
@@ -235,9 +307,9 @@ console.log(result);
       min-height: 60%;
     }
     .overlay-section {
-      flex: 0 0 40%;
-      max-height: 40%;
-      min-height: 200px;
+      flex: 0 0 50%;
+      max-height: 50%;
+      min-height: 280px;
       width: 100%;
       max-width: none;
       border-left: none;

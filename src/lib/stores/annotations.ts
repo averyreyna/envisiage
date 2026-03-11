@@ -13,12 +13,14 @@ export interface ThreadMessage {
 
 export interface Annotation {
   id: string;
+  fileId: string;
   selectionRange: SelectionRange;
   selectedText: string;
   explanation: string;
   status: AnnotationStatus;
   timestamp: number;
   thread: ThreadMessage[];
+  pinned?: boolean;
 }
 
 const STORAGE_KEY = 'envisiage-annotations';
@@ -38,18 +40,25 @@ function loadFromSession(): Annotation[] {
     if (!s) return [];
     const parsed = JSON.parse(s) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (a): a is Annotation =>
-        a &&
-        typeof a === 'object' &&
-        typeof a.id === 'string' &&
-        a.selectionRange &&
-        typeof a.selectedText === 'string' &&
-        typeof a.explanation === 'string' &&
-        typeof a.status === 'string' &&
-        typeof a.timestamp === 'number' &&
-        Array.isArray(a.thread)
-    );
+    const LEGACY_DEFAULT_FILE_ID = 'default';
+    return parsed
+      .filter(
+        (a): a is Annotation & { fileId?: string } =>
+          a &&
+          typeof a === 'object' &&
+          typeof a.id === 'string' &&
+          a.selectionRange &&
+          typeof a.selectedText === 'string' &&
+          typeof a.explanation === 'string' &&
+          typeof a.status === 'string' &&
+          typeof a.timestamp === 'number' &&
+          Array.isArray(a.thread)
+      )
+      .map((a) => ({
+        ...a,
+        fileId: typeof a.fileId === 'string' ? a.fileId : LEGACY_DEFAULT_FILE_ID,
+        pinned: (a as { pinned?: boolean }).pinned === true
+      }));
   } catch {
     return [];
   }
@@ -73,25 +82,36 @@ function createAnnotationsStore() {
 
   return {
     subscribe,
-    add: (selectionRange: SelectionRange, selectedText: string): string => {
+    add: (fileId: string, selectionRange: SelectionRange, selectedText: string): string => {
       const id = generateId();
       update((list) => {
         const next = [
           ...list,
           {
             id,
+            fileId,
             selectionRange,
             selectedText,
             explanation: '',
             status: 'loading' as AnnotationStatus,
             timestamp: Date.now(),
-            thread: []
+            thread: [],
+            pinned: false
           }
         ];
         save(next);
         return next;
       });
       return id;
+    },
+    togglePinned: (id: string) => {
+      update((list) => {
+        const next = list.map((a) =>
+          a.id === id ? { ...a, pinned: !a.pinned } : a
+        );
+        save(next);
+        return next;
+      });
     },
     remove: (id: string) => {
       update((list) => {
