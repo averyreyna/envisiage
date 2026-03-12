@@ -10,13 +10,13 @@
   import { annotationSummary } from '$lib/utils/summary';
   import { runReExplain } from '$lib/api/explain';
   import { submitFollowUp as submitFollowUpApi } from '$lib/api/followup';
+  import FollowUpForm from '$lib/components/FollowUpForm.svelte';
   import type { Annotation } from '$lib/stores/annotations';
   import type { ReExplainVariant } from '$lib/api/explain';
 
   const flyParams = { x: 24, duration: 300, easing: cubicOut };
   const wordFadeParams = { duration: 100 };
 
-  // split into words and spaces so we can animate each segment during streaming
   function streamingSegments(text: string): string[] {
     if (!text.trim()) return [];
     return text.split(/(\s+)/).filter(Boolean);
@@ -30,7 +30,6 @@
       : [];
   $: expandId = $expandAndScrollToId;
 
-  // Snap to and follow the AI reply while streaming a follow-up
   $: annotations, followUpSubmitting;
   $: if (annotations.length) {
     for (const ann of annotations) {
@@ -43,10 +42,15 @@
     }
   }
 
-  let followUpInputs: Record<string, string> = {};
   let followUpSubmitting: Record<string, boolean> = {};
   let reExplainSubmitting: Record<string, boolean> = {};
   let cardScrollRefs: Record<string, HTMLDivElement> = {};
+  let cardRefs: Record<string, HTMLDivElement> = {};
+  let resizeState: { id: string; startY: number; startHeight: number } | null = null;
+  const DEFAULT_CARD_HEIGHT = 320;
+  const MIN_CARD_HEIGHT = 120;
+  const MAX_CARD_HEIGHT = 520;
+  let cardHeights: Record<string, number> = {};
 
   function lineLabel(range: { startLine: number; endLine: number }): string {
     return range.startLine === range.endLine
@@ -100,11 +104,9 @@
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }
 
-  async function submitFollowUp(annotationId: string) {
-    const q = (followUpInputs[annotationId] ?? '').trim();
+  async function submitFollowUp(annotationId: string, question: string) {
+    const q = question.trim();
     if (!q || followUpSubmitting[annotationId]) return;
-    followUpInputs[annotationId] = '';
-    followUpInputs = followUpInputs;
     followUpSubmitting[annotationId] = true;
     followUpSubmitting = followUpSubmitting;
 
@@ -135,6 +137,42 @@
     { value: 'technical', label: 'Technical' },
     { value: 'different', label: 'Different angle' }
   ];
+
+  function getCardHeight(annotation: Annotation): number {
+    if (annotation.status === 'collapsed') return 0;
+    return cardHeights[annotation.id] ?? DEFAULT_CARD_HEIGHT;
+  }
+
+  function handleResizeStart(annotationId: string, e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const card = cardRefs[annotationId];
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    resizeState = {
+      id: annotationId,
+      startY: e.clientY,
+      startHeight: rect.height
+    };
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizeState || resizeState.id !== annotationId) return;
+      const dy = moveEvent.clientY - resizeState.startY;
+      let newHeight = Math.round(Math.min(MAX_CARD_HEIGHT, Math.max(MIN_CARD_HEIGHT, resizeState.startHeight + dy)));
+      cardHeights[annotationId] = newHeight;
+      cardHeights = cardHeights;
+    };
+    const onMouseUp = () => {
+      resizeState = null;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.removeProperty('user-select');
+      document.body.style.removeProperty('cursor');
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'ns-resize';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
 </script>
 
 <div class="overlay">
@@ -150,6 +188,8 @@
         class:card-loading={annotation.status === 'loading'}
         class:card-streaming={annotation.status === 'streaming'}
         class:card-collapsed={annotation.status === 'collapsed'}
+        style={annotation.status !== 'collapsed' ? `height: ${getCardHeight(annotation)}px` : ''}
+        bind:this={cardRefs[annotation.id]}
         role={annotation.status === 'collapsed' ? 'button' : 'region'}
         aria-label="Annotation at line {annotation.selectionRange.startLine}"
         tabindex={annotation.status === 'collapsed' ? 0 : -1}
@@ -242,28 +282,21 @@
             </button>
           </div>
           {#if annotation.status === 'complete'}
-            <form
-              class="thread-form"
-              on:submit|preventDefault={() => submitFollowUp(annotation.id)}
-            >
-              <input
-                type="text"
-                class="thread-input"
-                placeholder="Ask a follow-up..."
-                bind:value={followUpInputs[annotation.id]}
-                disabled={followUpSubmitting[annotation.id]}
-                aria-label="Follow-up question"
-              />
-              <button
-                type="submit"
-                class="thread-submit"
-                disabled={followUpSubmitting[annotation.id] || !(followUpInputs[annotation.id] ?? '').trim()}
-                aria-label="Send follow-up"
-              >
-                {followUpSubmitting[annotation.id] ? '…' : 'Send'}
-              </button>
-            </form>
+            <FollowUpForm
+              annotationId={annotation.id}
+              disabled={followUpSubmitting[annotation.id]}
+              on:submit={(e) => submitFollowUp(annotation.id, e.detail.question)}
+            />
           {/if}
+            {#if annotation.status !== 'collapsed'}
+              <div
+                class="card-resize-handle"
+                aria-label="Resize annotation"
+                title="Drag to resize"
+                role="separator"
+                on:mousedown|stopPropagation={(e) => handleResizeStart(annotation.id, e)}
+              ></div>
+            {/if}
         {/if}
       </div>
     </div>
@@ -301,14 +334,16 @@
     position: relative;
     left: 0;
     right: 0;
+    height: 320px;
     max-height: 520px;
-    min-height: 48px;
+    min-height: 120px;
     background: var(--ai-teal-fill, rgba(204, 251, 241, 0.75));
     border: 1px solid var(--border-default, #e5e5e5);
     border-radius: 6px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
     display: flex;
     cursor: default;
+    overflow: hidden;
   }
 
   @media (max-width: 767px) {
@@ -318,8 +353,11 @@
   }
 
   .card-collapsed {
+    height: auto;
     max-height: none;
     min-height: 40px;
+    resize: none;
+    overflow: visible;
     border-color: var(--border-subtle, #efefef);
     cursor: pointer;
   }
@@ -542,55 +580,6 @@
     border-radius: 3px;
   }
 
-  .thread-form {
-    display: flex;
-    gap: var(--space-xs, 4px);
-    flex-shrink: 0;
-  }
-
-  .thread-input {
-    flex: 1;
-    min-width: 0;
-    padding: var(--space-sm, 8px) var(--space-md, 12px);
-    font-size: var(--font-size-sm, 13px);
-    font-family: var(--font-ui);
-    border: 1px solid var(--border-subtle, #efefef);
-    border-radius: 6px;
-    background: var(--bg-editor, #fff);
-    color: var(--text-primary, #1a1a1a);
-    transition: border-color var(--duration-fast, 150ms);
-  }
-
-  .thread-input::placeholder {
-    color: var(--text-muted, #9b9b9b);
-  }
-
-  .thread-input:focus {
-    outline: none;
-    border-color: var(--ai-teal, #0d9488);
-  }
-
-  .thread-submit {
-    padding: var(--space-sm, 8px) var(--space-md, 12px);
-    font-size: var(--font-size-sm, 13px);
-    font-family: var(--font-ui);
-    font-weight: 500;
-    color: white;
-    background: var(--ai-teal, #0d9488);
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .thread-submit:hover:not(:disabled) {
-    background: #0b8278;
-  }
-
-  .thread-submit:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
   .card-actions {
     display: flex;
     align-items: center;
@@ -630,5 +619,34 @@
   .card-reexplain-btn:disabled {
     opacity: 0.7;
     cursor: wait;
+  }
+
+  .card-resize-handle {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 10px;
+    cursor: ns-resize;
+    flex-shrink: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.06), transparent);
+    border-radius: 0 0 6px 6px;
+  }
+
+  .card-resize-handle::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 4px;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--text-muted, #9b9b9b);
+    opacity: 0.6;
+  }
+
+  .card-resize-handle:hover::after {
+    opacity: 1;
   }
 </style>

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { GRANULARITY_LABELS, type Granularity } from '$lib/prompts/granularity';
-  import { contextPreviewRanges } from '$lib/stores/ui';
+  import { createEventDispatcher } from 'svelte';
   import type { SmartContext } from '$lib/utils/context';
 
   export let contextRanges: SmartContext | null = null;
@@ -11,20 +11,6 @@
     dispatch('select', { granularity: value as Granularity });
   }
 
-  function handleMouseEnter() {
-    if (contextRanges) {
-      contextPreviewRanges.set({
-        enclosing: contextRanges.enclosingScopeRange,
-        window: contextRanges.contextWindowRange
-      });
-    }
-  }
-
-  function handleMouseLeave() {
-    contextPreviewRanges.set(null);
-  }
-
-  import { createEventDispatcher } from 'svelte';
   const dispatch = createEventDispatcher<{ select: { granularity: Granularity } }>();
 </script>
 
@@ -32,8 +18,6 @@
   class="picker"
   role="group"
   aria-label="Explanation style"
-  on:mouseenter={handleMouseEnter}
-  on:mouseleave={handleMouseLeave}
 >
   <span class="picker-label">Explain:</span>
   <div class="pills">
@@ -81,16 +65,6 @@
     border: 1px solid var(--border-subtle);
     border-radius: 999px;
     cursor: pointer;
-    transition:
-      border-color var(--duration-fast),
-      background var(--duration-fast),
-      color var(--duration-fast);
-  }
-
-  .pill:hover:not(:disabled) {
-    border-color: var(--ai-teal);
-    background: var(--ai-teal-muted);
-    color: var(--ai-teal);
   }
 
   .pill:disabled {

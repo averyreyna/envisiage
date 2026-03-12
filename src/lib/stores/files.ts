@@ -5,18 +5,15 @@ import type { LanguageId } from './language';
 
 const DEFAULT_INITIAL_CODE = `// Select some code and press ⌘⇧E (Mac) or Ctrl+Shift+E (Win) to add an inline annotation.
 
-// closure and higher-order function
 function createMultiplier(factor) {
   return (n) => n * factor;
 }
 const double = createMultiplier(2);
 const triple = createMultiplier(3);
 
-// optional chaining and nullish coalescing
 const config = { theme: { dark: true }, limit: 10 };
 const limit = config?.pagination?.limit ?? 25;
 
-// async/await with error handling and AbortController
 async function fetchWithTimeout(url, ms = 5000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
@@ -31,7 +28,6 @@ async function fetchWithTimeout(url, ms = 5000) {
   }
 }
 
-// memoization (cache by arguments)
 function memoize(fn) {
   const cache = new Map();
   return function (...args) {
@@ -41,15 +37,12 @@ function memoize(fn) {
   };
 }
 
-// reducer and destructuring with rest
 const items = [{ id: 1, qty: 2 }, { id: 2, qty: 1 }];
 const total = items.reduce((acc, { qty, ...rest }) => acc + qty, 0);
 `;
 
-/** Python placeholder with easy, medium, and hard code blocks. */
 const DEFAULT_PYTHON_CODE = `# Select some code and press ⌘⇧E (Mac) or Ctrl+Shift+E (Win) to add an inline annotation.
 
-# --- Easy: basics ---
 name = "World"
 print(f"Hello, {name}!")
 
@@ -59,7 +52,6 @@ def greet(who):
 for i in range(3):
     print(greet(name))
 
-# --- Medium: comprehensions, context managers, dataclasses ---
 squares = [n * n for n in range(10)]
 evens = [x for x in squares if x % 2 == 0]
 
@@ -83,7 +75,6 @@ class Point:
     def distance(self, other: "Point") -> float:
         return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
 
-# --- Hard: async, generators, type hints, decorators ---
 import asyncio
 from typing import Iterator, TypeVar
 
@@ -138,7 +129,6 @@ const EXTENSION_TO_LANGUAGE: Record<string, LanguageId> = {
   json: 'json'
 };
 
-/** Preferred file extension per language (for syncing path when language changes). */
 export const LANGUAGE_TO_EXTENSION: Record<LanguageId, string> = {
   javascript: 'js',
   typescript: 'ts',
@@ -148,7 +138,6 @@ export const LANGUAGE_TO_EXTENSION: Record<LanguageId, string> = {
   json: 'json'
 };
 
-/** Returns path with extension replaced for the given language (e.g. "index.js" + python → "index.py"). */
 export function pathWithExtension(path: string, language: LanguageId): string {
   const base = path.includes('.') ? path.slice(0, path.lastIndexOf('.')) : path;
   const ext = LANGUAGE_TO_EXTENSION[language];
@@ -159,7 +148,6 @@ function generateId(): string {
   return `file-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/** Returns the default file set on fresh start: index.js (existing placeholder) + example.py (varying difficulty). */
 function getDefaultFiles(): FileEntry[] {
   const jsFile: FileEntry = {
     id: generateId(),
@@ -204,7 +192,7 @@ function loadFromStorage(): { files: FileEntry[]; activeFileId: string | null } 
     const { files, activeFileId } = parsed as { files: unknown[]; activeFileId: string | null };
     const validFiles = files.filter(
       (f): f is FileEntry =>
-        f &&
+        f != null &&
         typeof f === 'object' &&
         typeof (f as FileEntry).id === 'string' &&
         typeof (f as FileEntry).path === 'string' &&
@@ -219,7 +207,26 @@ function loadFromStorage(): { files: FileEntry[]; activeFileId: string | null } 
       typeof activeFileId === 'string' && validFiles.some((f) => f.id === activeFileId)
         ? activeFileId
         : validFiles[0].id;
-    return { files: validFiles, activeFileId: activeId };
+    const hasOldPythonPlaceholder = (content: string) =>
+      /# --- (Easy|Medium|Hard):/i.test(content);
+    const hasOldJsPlaceholder = (content: string) =>
+      content.includes('// closure and higher-order function') ||
+      content.includes('// memoization (cache');
+    const migratedFiles = validFiles.map((f) => {
+      if (f.path === 'example.py' && f.language === 'python' && hasOldPythonPlaceholder(f.content))
+        return { ...f, content: DEFAULT_PYTHON_CODE };
+      if (f.path === 'index.js' && f.language === 'javascript' && hasOldJsPlaceholder(f.content))
+        return { ...f, content: DEFAULT_INITIAL_CODE };
+      return f;
+    });
+    if (migratedFiles.some((f, i) => f.content !== validFiles[i].content)) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ files: migratedFiles, activeFileId: activeId }));
+      } catch {
+        // ignore storage errors
+      }
+    }
+    return { files: migratedFiles, activeFileId: activeId };
   } catch {
     const defaultFiles = getDefaultFiles();
     return { files: defaultFiles, activeFileId: defaultFiles[0].id };
@@ -231,7 +238,7 @@ function saveToStorage(files: FileEntry[], activeFileId: string | null) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ files, activeFileId }));
   } catch {
-    // ignore
+    // ignore storage errors
   }
 }
 

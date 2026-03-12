@@ -1,10 +1,6 @@
 import { get } from 'svelte/store';
 import { annotationsStore } from '$lib/stores/annotations';
 
-/**
- * Submit a follow-up question for an annotation. Updates the store and streams the response.
- * Caller is responsible for managing loading state (e.g. set true before, false after).
- */
 export async function submitFollowUp(annotationId: string, question: string): Promise<void> {
   const q = question.trim();
   if (!q) return;

@@ -11,7 +11,7 @@
   import { annotationsStore } from '$lib/stores/annotations';
   import { filesStore } from '$lib/stores/files';
   import { languageStore } from '$lib/stores/language';
-  import { panelVisible, activeAnnotationId, panelWidth, setPanelWidth, floatingExplainRect } from '$lib/stores/ui';
+  import { panelVisible, activeAnnotationId, panelWidth, setPanelWidth, floatingExplainRect, contextPreviewRanges } from '$lib/stores/ui';
   import { getSmartContext } from '$lib/utils/context';
   import type { Granularity } from '$lib/prompts/granularity';
   import type { SelectionRange } from '$lib/stores/editor';
@@ -20,6 +20,19 @@
   const filesStoreActiveId = filesStore.activeFileId;
   $: files = $filesStoreFiles;
   $: activeFileId = $filesStoreActiveId;
+  $: selection = $selectionStore;
+  $: annotations = $annotationsStore;
+  $: hasAnnotationForSelection =
+    activeFileId != null &&
+    selection != null &&
+    annotations.some(
+      (a) =>
+        a.fileId === activeFileId &&
+        a.selectionRange.startLine === selection.startLine &&
+        a.selectionRange.startCol === selection.startCol &&
+        a.selectionRange.endLine === selection.endLine &&
+        a.selectionRange.endCol === selection.endCol
+    );
 
   interface PendingTrigger {
     selection: SelectionRange;
@@ -29,6 +42,10 @@
   }
 
   let pendingTrigger: PendingTrigger | null = null;
+  let pickerDragOffset = { x: 0, y: 0 };
+  let pickerDragging = false;
+  let explainBtnOffset = { x: 0, y: 0 };
+  let explainBtnDragging = false;
 
   function openGranularityPicker() {
     const editor = $editorInstance;
@@ -52,6 +69,8 @@
     const selectedText = model.getValueInRange(range);
     const smartContext = getSmartContext(code, selection);
 
+    contextPreviewRanges.set(null);
+    pickerDragOffset = { x: 0, y: 0 };
     pendingTrigger = { selection, selectedText, code, smartContext };
   }
 
@@ -132,6 +151,65 @@
     runExplain(e.detail.granularity);
   }
 
+  function startPickerDrag(e: MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startOffset = { ...pickerDragOffset };
+    function onMove(moveEvent: MouseEvent) {
+      pickerDragOffset = {
+        x: startOffset.x + (moveEvent.clientX - startX),
+        y: startOffset.y + (moveEvent.clientY - startY)
+      };
+    }
+    function onUp() {
+      pickerDragging = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (browser) {
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    }
+    pickerDragging = true;
+    if (browser) {
+      document.body.style.cursor = 'move';
+      document.body.style.userSelect = 'none';
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
+  function startExplainBtnDrag(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startOffset = { ...explainBtnOffset };
+    function onMove(moveEvent: MouseEvent) {
+      explainBtnOffset = {
+        x: startOffset.x + (moveEvent.clientX - startX),
+        y: startOffset.y + (moveEvent.clientY - startY)
+      };
+    }
+    function onUp() {
+      explainBtnDragging = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (browser) {
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    }
+    explainBtnDragging = true;
+    if (browser) {
+      document.body.style.cursor = 'move';
+      document.body.style.userSelect = 'none';
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
   let resizing = false;
   function startResize() {
     resizing = true;
@@ -166,6 +244,9 @@
     if (resizing) {
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
+    } else if (pickerDragging || explainBtnDragging) {
+      document.body.style.cursor = 'move';
+      document.body.style.userSelect = 'none';
     } else {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
@@ -181,19 +262,53 @@
   <main class="main">
     <section class="editor-section">
       <CodeEditor {files} {activeFileId} />
-      {#if $floatingExplainRect && !pendingTrigger}
-        <button
-          type="button"
-          class="trigger-btn"
-          style="top: {$floatingExplainRect.top}px; left: {$floatingExplainRect.left}px;"
-          on:click={openGranularityPicker}
-          title="Add annotation (⌘⇧E / Ctrl+Shift+E)"
+      {#if $floatingExplainRect && !pendingTrigger && !hasAnnotationForSelection}
+        <div
+          class="trigger-toolbar"
+          style="top: {$floatingExplainRect.top + explainBtnOffset.y}px; left: {$floatingExplainRect.left + explainBtnOffset.x}px;"
+          role="toolbar"
+          aria-label="Explain selection"
         >
-          Explain
-        </button>
+          <div
+            class="trigger-toolbar-drag"
+            role="button"
+            tabindex="-1"
+            aria-label="Drag to move"
+            title="Drag to move"
+            on:mousedown|preventDefault={startExplainBtnDrag}
+          >
+            <span class="trigger-toolbar-drag-grip" aria-hidden="true">⋮⋮</span>
+          </div>
+          <button
+            type="button"
+            class="trigger-btn"
+            on:click={openGranularityPicker}
+            title="Add annotation (⌘⇧E / Ctrl+Shift+E)"
+          >
+            Explain
+          </button>
+        </div>
       {/if}
       {#if pendingTrigger}
-        <div class="picker-popover" role="dialog" aria-label="Choose explanation style">
+        <div
+          class="picker-popover"
+          class:picker-popover-anchored={$floatingExplainRect != null}
+          style={$floatingExplainRect != null ? `top: ${$floatingExplainRect.top + 44 + pickerDragOffset.y}px; left: ${$floatingExplainRect.left - 288 + pickerDragOffset.x}px;` : ''}
+          role="dialog"
+          aria-label="Choose explanation style"
+        >
+          {#if $floatingExplainRect != null}
+            <div
+              class="picker-popover-drag"
+              role="button"
+              tabindex="-1"
+              aria-label="Drag to move"
+              title="Drag to move"
+              on:mousedown|preventDefault={startPickerDrag}
+            >
+              <span class="picker-popover-drag-grip" aria-hidden="true">⋮⋮</span>
+            </div>
+          {/if}
           <GranularityPicker
             contextRanges={pendingTrigger.smartContext}
             on:select={handleGranularitySelect}
@@ -349,8 +464,40 @@
     }
   }
 
-  .trigger-btn {
+  .trigger-toolbar {
     position: absolute;
+    display: flex;
+    align-items: center;
+    padding: 4px 6px;
+    background: var(--bg-editor);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    z-index: 10;
+    gap: 4px;
+  }
+
+  .trigger-toolbar-drag {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 2px;
+    cursor: grab;
+    color: var(--text-muted, #9b9b9b);
+    border-radius: 4px;
+  }
+
+  .trigger-toolbar-drag:active {
+    cursor: grabbing;
+  }
+
+  .trigger-toolbar-drag-grip {
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    user-select: none;
+  }
+
+  .trigger-btn {
     padding: var(--space-sm) var(--space-md);
     font-size: var(--font-size-sm);
     font-family: var(--font-ui);
@@ -361,7 +508,6 @@
     border-radius: 6px;
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(13, 148, 136, 0.35);
-    z-index: 10;
   }
 
   .trigger-btn:hover {
@@ -374,8 +520,6 @@
 
   .picker-popover {
     position: absolute;
-    bottom: var(--space-lg);
-    right: var(--space-lg);
     padding: var(--space-md);
     background: var(--bg-editor);
     border: 1px solid var(--border-default);
@@ -386,6 +530,33 @@
     flex-direction: column;
     gap: var(--space-sm);
     max-width: 280px;
+  }
+
+  .picker-popover-drag {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: calc(-1 * var(--space-md)) calc(-1 * var(--space-md)) 0;
+    padding: var(--space-xs) var(--space-md);
+    cursor: grab;
+    border-radius: 8px 8px 0 0;
+    background: var(--bg-secondary, #f2f2f2);
+    color: var(--text-muted, #9b9b9b);
+  }
+
+  .picker-popover-drag:active {
+    cursor: grabbing;
+  }
+
+  .picker-popover-drag-grip {
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    user-select: none;
+  }
+
+  .picker-popover:not(.picker-popover-anchored) {
+    bottom: var(--space-lg);
+    right: var(--space-lg);
   }
 
   .picker-cancel {

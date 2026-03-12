@@ -40,13 +40,11 @@ export const hoveredAnnotationId = writable<string | null>(null);
 export const expandAndScrollToId = writable<string | null>(null);
 export const activeAnnotationId = writable<string | null>(null);
 
-/** Pixel position for the floating Explain button, relative to the editor container. Set by CodeEditor when selection is non-empty. */
 export const floatingExplainRect = writable<{ top: number; left: number } | null>(null);
 
-/** Per-annotation drag offset for in-editor cards (delta from default position). */
 export const annotationCardOffsets = writable<Record<string, { x: number; y: number }>>({});
 
-// ranges shown in the editor when hovering the granularity picker (enclosing scope + context window)
+// ranges shown when hovering granularity picker: window = lines above/below, enclosing = scope
 export interface ContextPreviewRanges {
   enclosing: LineRange | null;
   window: LineRange;

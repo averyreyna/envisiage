@@ -9,7 +9,5 @@ export interface SelectionRange {
 }
 
 export const editorInstance = writable<Monaco.editor.IStandaloneCodeEditor | null>(null);
-
 export const selectionStore = writable<SelectionRange | null>(null);
-
 export const editorScrollTop = writable<number>(0);

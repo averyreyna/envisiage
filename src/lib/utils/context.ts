@@ -16,7 +16,6 @@ export interface SmartContext {
   contextWindowRange: LineRange;
 }
 
-// scan upward from selection to find function/class/def/arrow or block start
 function findEnclosingScopeStart(lines: string[], selectionStartLine: number): number | null {
   const start = Math.max(0, selectionStartLine - 1);
   for (let i = start; i >= 0; i--) {
@@ -33,7 +32,6 @@ function findEnclosingScopeStart(lines: string[], selectionStartLine: number): n
   return null;
 }
 
-// match braces to find where the block starting at scopeStartLine ends
 function findBlockEnd(lines: string[], scopeStartLine: number): number | null {
   let depth = 0;
   const startIdx = scopeStartLine - 1;

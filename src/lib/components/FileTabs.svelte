@@ -23,7 +23,6 @@
     return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
   }
 
-  /** Icon color and optional label for common file types (VS Code–style) */
   const EXTENSION_STYLES: Record<string, { color: string }> = {
     js: { color: '#f7df1e' },
     jsx: { color: '#61dafb' },

@@ -1,5 +1,4 @@
 <script lang="ts">
-  // shown when there are no annotations yet
 </script>
 
 <div class="empty-state" role="status">

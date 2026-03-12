@@ -43,13 +43,15 @@
   const CARD_WIDTH = 360;
   const CARD_MARGIN = 24;
   const FLOATING_BTN_WIDTH = 90;
+  const EXPLAIN_BTN_RIGHT_INSET = 400;
   const FLOATING_BTN_GAP = 12;
+  const TOOLBAR_GAP = 6;
+  const TOOLBAR_BAR_HEIGHT = 36;
   let followUpInputs: Record<string, string> = {};
   let followUpSubmitting: Record<string, boolean> = {};
 
   const ENVISIAGE_THEME = 'envisiage-light';
   const GUTTER_CLASS = 'envisiage-gutter-dot';
-  const HIGHLIGHT_CLASS = 'envisiage-line-highlight';
   const CONTEXT_WINDOW_CLASS = 'envisiage-context-window';
   const CONTEXT_ENCLOSING_CLASS = 'envisiage-context-enclosing';
 
@@ -65,6 +67,7 @@
         'editor.selectionBackground': 'rgba(13, 148, 136, 0.2)',
         'editor.inactiveSelectionBackground': 'rgba(13, 148, 136, 0.1)',
         'editor.selectionHighlightBackground': 'rgba(13, 148, 136, 0.12)',
+        'editor.rangeHighlightBackground': 'rgba(13, 148, 136, 0.08)',
         'editorGutter.background': '#FFFFFF'
       }
     });
@@ -87,26 +90,13 @@
 
   function updateHighlightDecoration(
     editor: Monaco.editor.IStandaloneCodeEditor,
-    hoveredId: string | null,
-    annotations: Annotation[]
+    _hoveredId: string | null,
+    _annotations: Annotation[]
   ) {
+    // no range highlight; only gutter dot indicates explanation
     const model = editor.getModel();
     if (!model) return;
-    const ann = hoveredId ? annotations.find((a) => a.id === hoveredId) : null;
-    const newDecorations: Monaco.editor.IModelDeltaDecoration[] = ann
-      ? [
-          {
-            range: {
-              startLineNumber: ann.selectionRange.startLine,
-              startColumn: ann.selectionRange.startCol,
-              endLineNumber: ann.selectionRange.endLine,
-              endColumn: ann.selectionRange.endCol
-            },
-            options: { className: HIGHLIGHT_CLASS, isWholeLine: false }
-          }
-        ]
-      : [];
-    highlightDecorationIds = model.deltaDecorations(highlightDecorationIds, newDecorations);
+    highlightDecorationIds = model.deltaDecorations(highlightDecorationIds, []);
   }
 
   function updateContextPreviewDecoration(
@@ -381,8 +371,12 @@
     } else {
       try {
         const lineTop = editorRef.getTopForLineNumber(selection.startLine);
-        const top = lineTop - scrollTop - 6;
-        const left = container.offsetWidth - FLOATING_BTN_WIDTH - CARD_MARGIN - FLOATING_BTN_GAP;
+        const rawTop = lineTop - scrollTop - TOOLBAR_BAR_HEIGHT - TOOLBAR_GAP;
+        const top = Math.max(0, rawTop);
+        const left = Math.max(
+          CARD_MARGIN,
+          container.offsetWidth - CARD_WIDTH - CARD_MARGIN - FLOATING_BTN_WIDTH - 8 - EXPLAIN_BTN_RIGHT_INSET
+        );
         floatingExplainRect.set({ top, left });
       } catch {
         floatingExplainRect.set(null);
@@ -457,7 +451,6 @@
           getFollowUpInput: (id) => followUpInputs[id] ?? '',
           setFollowUpInput: (id, value) => {
             followUpInputs[id] = value;
-            followUpInputs = followUpInputs;
           },
           isFollowUpSubmitting: (id) => followUpSubmitting[id] ?? false,
           onFollowUpSubmit: (id, question) => {
@@ -607,8 +600,12 @@
       }
       try {
         const lineTop = editor.getTopForLineNumber(sel.startLine);
-        const top = lineTop - editor.getScrollTop() - 6;
-        const left = container.offsetWidth - FLOATING_BTN_WIDTH - CARD_MARGIN - FLOATING_BTN_GAP;
+        const rawTop = lineTop - editor.getScrollTop() - TOOLBAR_BAR_HEIGHT - TOOLBAR_GAP;
+        const top = Math.max(0, rawTop);
+        const left = Math.max(
+          CARD_MARGIN,
+          container.offsetWidth - CARD_WIDTH - CARD_MARGIN - FLOATING_BTN_WIDTH - 8 - EXPLAIN_BTN_RIGHT_INSET
+        );
         floatingExplainRect.set({ top, left });
       } catch {
         floatingExplainRect.set(null);
@@ -638,7 +635,6 @@
 
     disposables = [selectionDisposable, scrollDisposable, layoutDisposable, mouseDownDisposable];
 
-    // sync scroll position so overlay cards can align with visible lines
     editorScrollTop.set(editor.getScrollTop());
   });
 
@@ -713,19 +709,7 @@
     background: var(--ai-teal, #0d9488);
     margin-left: 2px;
   }
-  .editor-wrapper :global(.envisiage-line-highlight) {
-    background: var(--ai-teal-glow, rgba(13, 148, 136, 0.12));
-    opacity: 0;
-    animation: envisiage-highlight-fade-in var(--duration-fast, 150ms) var(--ease-out) forwards;
-  }
 
-  @keyframes envisiage-highlight-fade-in {
-    to {
-      opacity: 1;
-    }
-  }
-
-  /* context sent to api when user hovers granularity picker: window = lines above/below, enclosing = scope */
   .editor-wrapper :global(.envisiage-context-window) {
     background: rgba(13, 148, 136, 0.06);
     transition: background var(--duration-fast);
@@ -735,7 +719,6 @@
     transition: background var(--duration-fast);
   }
 
-  /* inline explanation content widget */
   .editor-wrapper :global(.envisiage-inline-widget) {
     max-width: min(420px, 90%);
     cursor: default;
