@@ -6,22 +6,6 @@ Envisiage is an inline code tutor that runs in the browser. You work in a multi-
   <img src="envisiage.gif" />
 </p>
 
-## **Features**
-
-- **Multi-file editor** — Tabs for multiple files (default: `index.js` and `example.py`). Files and active tab persist in `localStorage`.
-- **Explanation styles** — Choose how you want the selection explained:
-  - **ELI5** — Beginner-friendly, simple analogies, no assumed programming knowledge.
-  - **Step-through** — Line-by-line walkthrough with numbered steps.
-  - **Technical** — Assumes language familiarity; focuses on *why* (design, performance, idioms).
-  - **Debug** — Helps find issues: edge cases, off-by-one errors, what to check or log.
-- **Smart context** — Enclosing scope and surrounding lines are sent to the API so explanations stay relevant.
-- **Follow-up thread** — After an explanation, ask follow-up questions; answers stream in the same panel. Thread is conversational (user/assistant messages).
-- **Keyboard shortcuts**
-  - **⌘⇧E** (Mac) / **Ctrl+Shift+E** (Win) — Open explanation-style picker for the current selection.
-  - **⌘⇧A** — Toggle the explanation panel visibility.
-  - **Escape** — Cancel the picker or collapse the active annotation.
-- **Persistence** — Annotations (and their threads) persist in `sessionStorage` for the session.
-
 ## **Prerequisites**
 
 - **Node.js** (v18 or later)
